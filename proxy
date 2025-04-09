@@ -1,0 +1,140 @@
+#!/bin/bash
+
+# Check if the user provided the last part of the proxy IP
+if [ -z "$1" ]; then
+  echo "Usage: $0 <proxy-last-part OR 0 to clear>"
+  exit 1
+fi
+
+# Define the proxy IP base and concatenate the provided last part
+PROXY_BASE="192.168.112."
+PROXY_IP="${PROXY_BASE}$1"
+PROXY_PORT="7071"
+PROXY_URL="http://$PROXY_IP:$PROXY_PORT/"
+
+# Define the file paths
+PROFILE_D_PROXY="/etc/profile.d/proxy.sh"
+DNF_CONF="/etc/dnf/dnf.conf"
+DISCORD_DESKTOP_ENTRY="/var/lib/flatpak/exports/share/applications/com.discordapp.Discord.desktop"
+
+# Function to clear all proxy environment variables
+clear_all_proxy_env_vars() {
+  # Clear proxy settings in /etc/profile.d/proxy.sh
+  sudo tee "$PROFILE_D_PROXY" > /dev/null <<EOL
+  unset ALL_PROXY  HTTP_PROXY FTP_PROXY http_proxy https_proxy ftp_proxy all_proxy HTTPS_PROXY
+
+# Proxy settings have been cleared
+EOL
+
+  # Remove proxy settings from /etc/dnf/dnf.conf
+  sudo sed -i '/^proxy=/d' "$DNF_CONF"
+  
+  # Remove Git proxy configuration if it exists
+  git config --global --unset-all http.proxy
+
+  # Remove npm proxy configuration if it exists
+  npm config delete proxy
+  npm config delete https-proxy
+
+  # Reset GNOME proxy settings
+  gsettings set org.gnome.system.proxy mode 'none'
+
+  # Reset Waydroid container proxy (if applicable)
+  # adb shell settings put global http_proxy :0
+}
+
+# Function to add proxy settings to /etc/profile.d/proxy.sh
+setup_profile_d_proxy() {
+  clear_all_proxy_env_vars
+
+  # Add new proxy settings to /etc/profile.d/proxy.sh
+  sudo tee "$PROFILE_D_PROXY" > /dev/null <<EOL
+  export http_proxy="$PROXY_URL"
+  export https_proxy="$PROXY_URL"
+  export all_proxy="$PROXY_URL"
+  export ftp_proxy="$PROXY_URL"
+  export no_proxy="localhost,127.0.0.1,::1"
+  export HTTP_PROXY="$PROXY_URL"
+  export HTTPS_PROXY="$PROXY_URL"
+  export ALL_PROXY="$PROXY_URL"
+  export FTP_PROXY="$PROXY_URL"
+  export NO_PROXY="localhost,127.0.0.1,::1"
+  EOL
+  echo "Proxy settings added to $PROFILE_D_PROXY"
+
+  # Source the new proxy settings (for the current session)
+
+  source "$PROFILE_D_PROXY"
+
+  # Set Git proxy configuration
+  git config --global http.proxy "$PROXY_URL"
+
+  # Set npm proxy configuration
+  npm config set proxy "$PROXY_URL"
+  npm config set https-proxy "$PROXY_URL"
+
+  # Set GNOME proxy settings
+  gsettings set org.gnome.system.proxy mode 'manual'
+  gsettings set org.gnome.system.proxy.http host "$PROXY_IP"
+  gsettings set org.gnome.system.proxy.http port "$PROXY_PORT"
+  gsettings set org.gnome.system.proxy.https host "$PROXY_IP"
+  gsettings set org.gnome.system.proxy.https port "$PROXY_PORT"
+
+  # Set Waydroid container proxy (if applicable)
+  # adb shell settings put global http_proxy "$PROXY_IP"
+}
+
+# Function to add proxy settings to /etc/dnf/dnf.conf
+setup_dnf_conf() {
+  # Clear previous proxy settings
+  sudo sed -i '/^proxy=/d' "$DNF_CONF"
+
+  # Add new proxy settings
+  sudo tee -a "$DNF_CONF" > /dev/null <<EOL
+proxy=$PROXY_URL
+EOL
+  echo "Proxy settings added to $DNF_CONF"
+}
+
+# Function to update the Discord desktop entry with the proxy flag
+update_discord_desktop_entry() {
+  if [ -f "$DISCORD_DESKTOP_ENTRY" ]; then
+    # Check if --proxy-server is already present; if not, append it
+    if ! grep -q -- "--proxy-server" "$DISCORD_DESKTOP_ENTRY"; then
+      sudo sed -i "s|Exec=.*|& --proxy-server=$PROXY_URL|" "$DISCORD_DESKTOP_ENTRY"
+      echo "Proxy server flag added to Discord desktop entry."
+    else
+      echo "Proxy server flag is already present. No changes made."
+    fi
+  else
+    echo "Discord desktop entry not found. Skipping."
+  fi
+}
+
+# Function to remove the proxy flag from the Discord desktop entry
+reset_discord_desktop_entry() {
+  if [ -f "$DISCORD_DESKTOP_ENTRY" ]; then
+    # Remove only the --proxy-server=<proxy_data> part
+    sudo sed -i 's/ --proxy-server=[^ ]*//g' "$DISCORD_DESKTOP_ENTRY"
+    echo "Proxy settings removed from Discord desktop entry."
+  else
+    echo "Discord desktop entry not found. Skipping."
+  fi
+}
+
+# If the argument is 0, clear the proxy settings
+if [ "$1" -eq 0 ]; then
+  clear_all_proxy_env_vars
+  reset_discord_desktop_entry
+  echo "All proxy settings have been cleared."
+  zsh
+  exit 0
+fi
+
+# Run the functions to set up the proxy
+setup_profile_d_proxy
+setup_dnf_conf
+update_discord_desktop_entry
+zsh
+echo "Proxy setup complete."
+

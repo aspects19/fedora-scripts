@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Modify these and make sure password is at least 8 characters
+WIFI_IFACE="wlp2s0"
+INTERNET_IFACE="enp0s31f6"
+SSID="your_hotspot's_name"
+PASSWORD="your_hotspot's_password"
+
+if [ "$1" == "on" ]; then
+    echo "[+] Starting WiFi hotspot..."
+    pkexec --user root create_ap "$WIFI_IFACE" "$INTERNET_IFACE" "$SSID" "$PASSWORD" --freq-band 2.4
+elif [ "$1" == "off" ]; then
+    echo "[+] Stopping WiFi hotspot..."
+    pkexec --user root create_ap --stop "$WIFI_IFACE"
+else
+    echo "Usage: $0 {on|off}"
+fi
